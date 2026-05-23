@@ -27,6 +27,7 @@ target_link_libraries(ThinMix PUBLIC
 
 add_executable(ModPlayerNeow
     src/binio_helper.c
+    src/mod_helper.c
     src/LFO.cpp
     src/mod_file.cpp
     src/main.cpp

@@ -7,7 +7,7 @@
 #include "LFO.h"
 #include "mod_file.h"
 
-#define NTSC_AMIGA
+// #define NTSC_AMIGA
 
 #ifdef NTSC_AMIGA
     #define MASTER_CLOCK_FREQ 3579545.0f
@@ -248,6 +248,10 @@ struct efx_status_t {
 
     uint8_t retrig_note = 0;
     uint8_t retrig_note_tick = 0;
+
+    uint8_t note_delay_tick = 0;
+    float note_delay_period = 0;
+    int note_delay_sample = 0;
 };
 
 class MOD_TRACKER {
@@ -461,7 +465,20 @@ public:
                 channels[c].set_volume(0);
                 printf("C%d: NOTE CUT\n", c);
             }
-        } else if (((chan_efx[c].cmd == 0xE) && (U8_HI(chan_efx[c].par) == 0x9)) && (chan_efx[c].retrig_note)) { // RETRIG NOTE
+        } else if (chan_efx[c].note_delay_tick) {
+            chan_efx[c].note_delay_tick--;
+            if (chan_efx[c].note_delay_tick == 0) {
+                if (chan_efx[c].note_delay_period) {
+                    channels[c].set_period(chan_efx[c].note_delay_period);
+                    chan_efx[c].note_delay_period = 0;
+                }
+                if (chan_efx[c].note_delay_sample) {
+                    channels[c].set_sample(mod->get_sample(chan_efx[c].note_delay_sample));
+                    chan_efx[c].note_delay_sample = 0;
+                }
+                printf("C%d: DELAY NOTE TRIG\n", c);
+            }
+        } else if ((chan_efx[c].cmd == 0xE) && (U8_HI(chan_efx[c].par) == 0x9)) { // RETRIG NOTE
             chan_efx[c].retrig_note_tick--;
             if (chan_efx[c].retrig_note_tick == 0) {
                 channels[c].start();
@@ -625,6 +642,7 @@ public:
 
                 case 0x9: // RETRIG NOTE
                     chan_efx[c].retrig_note = E_par;
+                    chan_efx[c].retrig_note_tick = E_par;
                     printf("C%d: SET RETRIG NOTE -> %d\n", c, E_par);
                     break;
 
@@ -644,6 +662,11 @@ public:
                         channels[c].set_volume(0);
                     }
                     printf("C%d: SET NOTE CUT TICK -> %d\n", c, E_par);
+                    break;
+
+                case 0xD: // NOTE DELAY
+                    chan_efx[c].note_delay_tick = E_par;
+                    printf("C%d: SET NOTE DELAY -> %d\n", c, E_par);
                     break;
 
                 default:
@@ -680,6 +703,9 @@ public:
                 if ((note->efx_cmd == 0x3) || (note->efx_cmd == 0x5)) {
                     chan_efx[c].tone_porta_target_period = note->period;
                     printf("C%d: SET TONEPORTAMENTO TARGET -> %d\n", c, note->period);
+                } else if ((note->efx_cmd == 0xE) && (U8_HI(note->efx_par) == 0xD)) {
+                    chan_efx[c].note_delay_period = note->period;
+                    continue;
                 } else {
                     channels[c].set_period(note->period);
                     channels[c].start();
@@ -691,7 +717,12 @@ public:
                 chan_efx[c].base_volume = channels[c].get_volume();
             }
             if (note->sample) {
-                channels[c].set_sample(mod->get_sample(note->sample - 1));
+                if ((note->efx_cmd == 0xE) && (U8_HI(note->efx_par) == 0xD)) {
+                    chan_efx[c].note_delay_sample = note->sample - 1;
+                    continue;
+                } else {
+                    channels[c].set_sample(mod->get_sample(note->sample - 1));
+                }
             }
             process_row_efx(c, note->efx_cmd, note->efx_par);
         }
