@@ -39,7 +39,7 @@ int main() {
 
     char err_buf[64];
 
-    if (mod.open("../urea.mod")) {
+    if (mod.open("PRODIGY - Junglelism.mod")) {
         tm_destroy(tm);
         return -2;
     }

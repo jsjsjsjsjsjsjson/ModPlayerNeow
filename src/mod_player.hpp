@@ -103,11 +103,14 @@ public:
         if (smp->data.size() == 0) {
             return;
         }
-        if (freq < 1.0f) {
+        if (freq < 4181) {
             printf("WARN: Freq too low (%d)\n", (int)freq);
             goto zero_buf;
+        } else if (freq > 31680) {
+            printf("WARN: Freq too high (%d)\n", (int)freq);
+            goto zero_buf;
         }
-        if (samp_rate < 1000) {
+        if (samp_rate < 4000) {
             printf("ERR: Sample rate too low (%d)\n", samp_rate);
             goto zero_buf;
         }
@@ -129,7 +132,7 @@ public:
                         p_i += (uint32_t)p_f;
                         p_f -= (uint32_t)p_f; // Error accumulation
                     }
-                    
+
                     if ((smp->loop_length > 2) && !disable_loop) { // Looping is enabled when the loop length is larger than 2
                         if (p_i >= (smp->loop_start + smp->loop_length)) {
                             p_i -= smp->loop_length; // Error accumulation
@@ -240,6 +243,11 @@ struct efx_status_t {
 
     float tone_porta_target_period = 0;
     uint8_t tone_porta_speed = 0;
+
+    uint8_t note_cut_tick = 0;
+
+    uint8_t retrig_note = 0;
+    uint8_t retrig_note_tick = 0;
 };
 
 class MOD_TRACKER {
@@ -416,7 +424,7 @@ public:
             break;
 
         case 0x5: // TonePortamento + VolumeSlide
-            channels[c].set_volume((int)channels[c].get_volume() + 
+            channels[c].set_volume((int)channels[c].get_volume() +
                 ((int)U8_HI(chan_efx[c].vol_slide_par) - (int)U8_LO(chan_efx[c].vol_slide_par))
             );
             chan_efx[c].base_volume = channels[c].get_volume();
@@ -426,7 +434,7 @@ public:
             break;
 
         case 0x6: // Vibrato + VolumeSlide
-            channels[c].set_volume((int)channels[c].get_volume() + 
+            channels[c].set_volume((int)channels[c].get_volume() +
                 ((int)U8_HI(chan_efx[c].vol_slide_par) - (int)U8_LO(chan_efx[c].vol_slide_par))
             );
             chan_efx[c].base_volume = channels[c].get_volume();
@@ -438,16 +446,31 @@ public:
             break;
 
         case 0xA: // VolumeSlide
-            channels[c].set_volume((int)channels[c].get_volume() + 
+            channels[c].set_volume((int)channels[c].get_volume() +
                 ((int)U8_HI(chan_efx[c].vol_slide_par) - (int)U8_LO(chan_efx[c].vol_slide_par))
             );
             break;
-        
+
         default:
             break;
         }
-        
-        // Funking the vibrato and tremolo....XD
+
+        if (chan_efx[c].note_cut_tick) {
+            chan_efx[c].note_cut_tick--;
+            if (chan_efx[c].note_cut_tick == 0) {
+                channels[c].set_volume(0);
+                printf("C%d: NOTE CUT\n", c);
+            }
+        } else if ((U8_HI(chan_efx[c].par) == 0x9) && (chan_efx[c].retrig_note)) { // RETRIG NOTE
+            chan_efx[c].retrig_note_tick--;
+            if (chan_efx[c].retrig_note_tick == 0) {
+                channels[c].start();
+                chan_efx[c].retrig_note_tick = chan_efx[c].retrig_note;
+                printf("C%d: RETRIG\n", c);
+            }
+        }
+
+        // Fucking the vibrato and tremolo....XD
         // Anyway, this is a handler for vibrato
         if ((chan_efx[c].vibrato_status_last == true) && (chan_efx[c].vibrato_enable == false)) { // falling edge
             chan_efx[c].vibrato.reset_phase();
@@ -496,28 +519,28 @@ public:
         printf("C%d: EFX %1X%02X\n", c, cmd, par);
         switch (chan_efx[c].cmd)
         {
-        case 0x1:
+        case 0x1: // SET PORTAMENTO UP
             if (par) {
                 chan_efx[c].porta_up = par;
                 printf("C%d: SET PORTAMENTO UP -> %d\n", c, par);
             }
             break;
 
-        case 0x2:
+        case 0x2: // SET PORTAMENTO DOWN
             if (par) {
                 chan_efx[c].porta_down = par;
                 printf("C%d: SET PORTAMENTO DOWN -> %d\n", c, par);
             }
             break;
 
-        case 0x3:
+        case 0x3: // SET TONE PORTAMENTO
             if (par) {
                 chan_efx[c].tone_porta_speed = par;
                 printf("C%d: SET TONE PORTAMENTO, SPEED -> %d\n", c, par);
             }
             break;
 
-        case 0x4:
+        case 0x4: // SET VIBRATO
             chan_efx[c].vibrato_enable = true;
             if (par) {
                 chan_efx[c].vibrato.set_param(par);
@@ -525,20 +548,20 @@ public:
             }
             break;
 
-        case 0x5:
+        case 0x5: // SET VOLUME SLIDE
             // if (par)
                 chan_efx[c].vol_slide_par = par;
                 printf("C%d: SET VOLUME SLIDE -> +%d -%d, TONE PORTAMENTO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
             break;
 
-        case 0x6:
+        case 0x6: // SET VOLUME SLIDE + VIBRATO
             chan_efx[c].vibrato_enable = true;
             // if (par)
                 chan_efx[c].vol_slide_par = par;
                 printf("C%d: SET VOLUME SLIDE -> +%d -%d, VIBRATO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
             break;
 
-        case 0x7:
+        case 0x7: // SET TREMOLOS
             chan_efx[c].tremolo_enable = true;
             chan_efx[c].base_volume = channels[c].get_volume();
             if (par) {
@@ -547,69 +570,82 @@ public:
             }
             break;
 
-        case 0x9:
+        case 0x9: // SET SAMPLE OFFSET
             channels[c].set_sample_offset(par << 8);
             printf("C%d: SET SAMPLE OFFSET -> %d\n", c, par << 8);
             break;
 
-        case 0xA:
+        case 0xA: // SET VOLUME SLIDE
             // if (par)
                 chan_efx[c].vol_slide_par = par;
                 printf("C%d: SET VOLUME SLIDE -> +%d -%d\n", c, U8_HI(par), U8_LO(par));
             break;
 
-        case 0xC:
+        case 0xC: // SET VOLUME
             channels[c].set_volume(par);
             printf("C%d: SET VOLUME -> %d\n", c, par);
             break;
 
-        case 0xD:
+        case 0xD: // SET PATTERN BREAK
             pos++;
             row = par;
             printf("GLOBAL: PATTERN BREAK -> %d\n", par);
             break;
 
-        case 0xE:
+        case 0xE: // Sub command
             {
                 uint8_t E_par = U8_LO(par);
                 switch (U8_HI(par)) {
-                case 0x1:
+                case 0x1: // FINE SLIDE UP
                     channels[c].set_period(channels[c].get_period() - E_par);
                     chan_efx[c].base_period = channels[c].get_period();
                     printf("C%d: FINE SLIDE UP -> %d\n", c, E_par);
                     break;
 
-                case 0x2:
+                case 0x2: // FINE SLIDE DOWN
                     channels[c].set_period(channels[c].get_period() + E_par);
                     chan_efx[c].base_period = channels[c].get_period();
                     printf("C%d: FINE SLIDE DOWN -> %d\n", c, E_par);
                     break;
 
-                case 0x4:
+                case 0x4: // SET VIBRATO WAVEFORM
                     chan_efx[c].vibrato.set_waveform(E_par);
                     printf("C%d: SET VIBRATO WAVEFORM -> %d\n", c, E_par);
                     break;
 
-                case 0x5:
+                case 0x5: // SET FINETUNE
                     channels[c].set_finetune((int8_t)(E_par ^ 0x08) - 0x08);
                     printf("C%d: SET FINETUNE -> %d\n", c, channels[c].get_finetune());
                     break;
 
-                case 0x7:
+                case 0x7: // SET TREMOLO WAVEFORM
                     chan_efx[c].tremolo.set_waveform(E_par);
                     printf("C%d: SET TREMOLO WAVEFORM -> %d\n", c, E_par);
                     break;
 
-                case 0xA:
+                case 0x9: // RETRIG NOTE
+                    chan_efx[c].retrig_note = E_par;
+                    printf("C%d: SET RETRIG NOTE -> %d\n", c, E_par);
+                    break;
+
+                case 0xA: // FINE VOLUME SLIDE UP
                     channels[c].set_volume(channels[c].get_volume() + E_par);
                     printf("C%d: FINE VOLUME SLIDE UP -> %d\n", c, E_par);
                     break;
 
-                case 0xB:
+                case 0xB: // FINE VOLUME SLIDE DOWN
                     channels[c].set_volume(channels[c].get_volume() - E_par);
                     printf("C%d: FINE VOLUME SLIDE DOWN -> %d\n", c, E_par);
                     break;
-                
+
+                case 0xC: // SET NOTE CUT TICK
+                    chan_efx[c].note_cut_tick = E_par;
+                    if (E_par == 0) {
+                        channels[c].set_volume(0);
+                    }
+                    printf("C%d: SET NOTE CUT TICK -> %d\n", c, E_par);
+                    break;
+
                 default:
                     break;
                 }
@@ -625,7 +661,7 @@ public:
                 printf("GLOBAL: SET TICKS/ROW -> %d\n", par);
             }
             break;
-        
+
         default:
             // printf("C%d: UNKNOW EFX %1X%02X\n", c, cmd, par);
             break;
