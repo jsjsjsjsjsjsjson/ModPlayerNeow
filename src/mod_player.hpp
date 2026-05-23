@@ -461,7 +461,7 @@ public:
                 channels[c].set_volume(0);
                 printf("C%d: NOTE CUT\n", c);
             }
-        } else if ((U8_HI(chan_efx[c].par) == 0x9) && (chan_efx[c].retrig_note)) { // RETRIG NOTE
+        } else if (((chan_efx[c].cmd == 0xE) && (U8_HI(chan_efx[c].par) == 0x9)) && (chan_efx[c].retrig_note)) { // RETRIG NOTE
             chan_efx[c].retrig_note_tick--;
             if (chan_efx[c].retrig_note_tick == 0) {
                 channels[c].start();
