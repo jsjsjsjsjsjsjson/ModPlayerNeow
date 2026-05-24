@@ -58,8 +58,59 @@ private:
 
     bool disable_loop = false; // For debug or view
 
+    uint8_t invert_loop_speed = 0;
+    uint16_t invert_loop_acc = 0;
+    uint32_t invert_loop_pos = 0;
+    std::vector<uint8_t> invert_loop_flags;
+
     FIRFilter aa_fir;
     size_t aa_fir_taps = 129;
+
+    int16_t get_sample_value(uint32_t idx) {
+        if (smp == NULL) {
+            return 0;
+        }
+
+        if (idx >= smp->data.size()) {
+            return 0;
+        }
+
+        int16_t v = smp->data[idx];
+
+        if ((smp->loop_length > 2) && (invert_loop_flags.size() == smp->loop_length)) {
+            uint32_t loop_start = smp->loop_start;
+            uint32_t loop_end = smp->loop_start + smp->loop_length;
+
+            if (loop_end > smp->data.size()) {
+                loop_end = smp->data.size();
+            }
+
+            if ((idx >= loop_start) && (idx < loop_end)) {
+                uint32_t loop_pos = idx - loop_start;
+
+                if ((loop_pos < invert_loop_flags.size()) && invert_loop_flags[loop_pos]) {
+                    v = -1 - v;
+                }
+            }
+        }
+
+        return v;
+    }
+
+    void rebuild_invert_loop_flags() {
+        invert_loop_flags.clear();
+        invert_loop_pos = 0;
+
+        if (smp == NULL) {
+            return;
+        }
+
+        if (smp->loop_length <= 2) {
+            return;
+        }
+
+        invert_loop_flags.resize(smp->loop_length, 0);
+    }
 
 public:
     MOD_CHANNEL() {
@@ -143,7 +194,7 @@ public:
 
                     if (active) {
                         if (p_i < smp->data.size()) {
-                            x = (float)smp->data[p_i] * (float)vol;
+                            x = (float)get_sample_value(p_i) * (float)vol;
                         } else {
                             x = 0.0f;
                         }
@@ -216,6 +267,8 @@ public:
         }
         smp = s;
         vol = smp->volume;
+        invert_loop_acc = 0;
+        rebuild_invert_loop_flags();
         // printf("set_sample(%p)\n", smp);
     }
 
@@ -259,6 +312,65 @@ public:
 
     int8_t get_finetune() {
         return finetune;
+    }
+
+    void set_invert_loop(uint8_t speed) {
+        invert_loop_speed = speed & 0x0F;
+
+        if (invert_loop_speed == 0) {
+            invert_loop_acc = 0;
+            return;
+        }
+
+        if (invert_loop_flags.size() != (smp ? smp->loop_length : 0)) {
+            rebuild_invert_loop_flags();
+        }
+    }
+
+    void process_invert_loop_tick() {
+        static const uint8_t invert_loop_table[16] = {
+            0, 5, 6, 7, 8, 10, 11, 13,
+            16, 19, 22, 26, 32, 43, 64, 128
+        };
+
+        if (invert_loop_speed == 0) {
+            return;
+        }
+
+        if (smp == NULL) {
+            return;
+        }
+
+        if ((smp->loop_length <= 2) || disable_loop) {
+            return;
+        }
+
+        if (invert_loop_flags.size() != smp->loop_length) {
+            rebuild_invert_loop_flags();
+        }
+
+        if (invert_loop_flags.size() == 0) {
+            return;
+        }
+
+        invert_loop_acc += invert_loop_table[invert_loop_speed];
+
+        if (invert_loop_acc < 128) {
+            return;
+        }
+
+        invert_loop_acc -= 128;
+
+        if (invert_loop_pos >= invert_loop_flags.size()) {
+            invert_loop_pos = 0;
+        }
+
+        invert_loop_flags[invert_loop_pos] ^= 1;
+
+        invert_loop_pos++;
+        if (invert_loop_pos >= invert_loop_flags.size()) {
+            invert_loop_pos = 0;
+        }
     }
 
     void set_disable_loop(bool s) {
@@ -607,6 +719,10 @@ public:
             }
         }
 
+        for (int c = 0; c < get_num_channel(); c++) {
+            channels[c].process_invert_loop_tick();
+        }
+
         tick_count++;
 
         if (tick_count >= ticks_row) {
@@ -789,6 +905,11 @@ public:
                     // I analyzed over 10000 .mod files,
                     // and found that only about 2% of them used the EEx command,
                     // so I decided not to bother with it XD
+                    break;
+
+                case 0xF: // INVERT LOOP
+                    channels[c].set_invert_loop(E_par);
+                    // printf("C%d: SET INVERT LOOP -> %d\n", c, E_par);
                     break;
 
                 default:
