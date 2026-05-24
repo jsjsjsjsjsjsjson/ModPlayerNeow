@@ -2,3 +2,5 @@ build/
 .vscode/
 .zed/
 .cache/
+*.mod
+*.wav
