@@ -50,13 +50,14 @@ private:
 public:
     int open(const char *filename);
     int read(char *errbuf, size_t errbuf_size);
-    
+
     mod_sample_t *get_sample(int i);
     uint32_t get_num_channel();
     int get_pattern_size(int p); // Even though the mod format is fixed at 64 rows per pattern, but i have OCD :P
     note_t *get_note_raw(int p, int c, int r); // Get note with raw patterns order
     note_t *get_note_order(int p, int c, int r); // Get note with Order list
     int get_order(int i); // Get the Order list, failed with return -1
+    int get_order_size();
 
     void print_pattern_data(int p);
 };

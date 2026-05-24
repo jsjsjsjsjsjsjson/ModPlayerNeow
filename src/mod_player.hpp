@@ -7,6 +7,8 @@
 #include "LFO.h"
 #include "mod_file.h"
 
+#include "FIRFilter.h"
+
 // #define NTSC_AMIGA
 
 #ifdef NTSC_AMIGA
@@ -56,7 +58,14 @@ private:
 
     bool disable_loop = false; // For debug or view
 
+    FIRFilter aa_fir;
+    size_t aa_fir_taps = 129;
+
 public:
+    MOD_CHANNEL() {
+        aa_fir.rebuild_lowpass(aa_fir_taps, os_factor);
+    }
+
     bool get_active() {
         return active;
     }
@@ -99,10 +108,12 @@ public:
             active = false;
             return;
         }
+
         // Abnormal param
         if (smp->data.size() == 0) {
             return;
         }
+
         if (freq < 4181) {
             printf("WARN: Freq too low (%d)\n", (int)freq);
             goto zero_buf;
@@ -110,42 +121,71 @@ public:
             printf("WARN: Freq too high (%d)\n", (int)freq);
             goto zero_buf;
         }
+
         if (samp_rate < 4000) {
             printf("ERR: Sample rate too low (%d)\n", samp_rate);
             goto zero_buf;
         }
+
         if (os_factor == 0) {
             printf("ERR: OverSample factor too low (%d)\n", os_factor);
             goto zero_buf;
         }
 
         {
-            // Phase accumulator
-            float p_c_os = p_c / (float)os_factor; // Phase Count for OverSample
+            float p_c_os = p_c / (float)os_factor;
+
             for (size_t i = 0; i < buf_size; i++) {
-                int32_t acc = 0; // Accumulator for OverSample
+                float y_decim = 0.0f;
+
                 for (uint32_t os = 0; os < os_factor; os++) {
-                    if (!active) continue;
-                    acc += (p_i < smp->data.size()) ? ((smp->data[p_i] * vol)) : 0; // To prevent potential array index out-of-bounds errors caused by oversampling
-                    p_f += p_c_os;
-                    if (p_f >= 1.0f) {
-                        p_i += (uint32_t)p_f;
-                        p_f -= (uint32_t)p_f; // Error accumulation
+                    float x = 0.0f;
+
+                    if (active) {
+                        if (p_i < smp->data.size()) {
+                            x = (float)smp->data[p_i] * (float)vol;
+                        } else {
+                            x = 0.0f;
+                        }
                     }
 
-                    if ((smp->loop_length > 2) && !disable_loop) { // Looping is enabled when the loop length is larger than 2
+                    y_decim = aa_fir.process(x);
+
+                    if (!active) {
+                        continue;
+                    }
+
+                    p_f += p_c_os;
+
+                    if (p_f >= 1.0f) {
+                        uint32_t step = (uint32_t)p_f;
+
+                        p_i += step;
+                        p_f -= (float)step;
+                    }
+
+                    if ((smp->loop_length > 2) && !disable_loop) {
                         if (p_i >= (smp->loop_start + smp->loop_length)) {
-                            p_i -= smp->loop_length; // Error accumulation
+                            p_i -= smp->loop_length;
                         }
-                    } else { // Otherwise, looping is disabled, therefore, set `active` to false after the sample has played to the end
+                    } else {
                         if (p_i >= smp->data.size()) {
                             stop();
                         }
                     }
                 }
-                acc /= os_factor; // Average filtering (even if the quality is really poor xwq)
-                buf[i] = softclip(acc);
+
+                int32_t out;
+
+                if (y_decim >= 0.0f) {
+                    out = (int32_t)(y_decim + 0.5f);
+                } else {
+                    out = (int32_t)(y_decim - 0.5f);
+                }
+
+                buf[i] = softclip(out);
             }
+
             return;
         }
 
@@ -160,6 +200,12 @@ public:
 
     void set_oversample_factor(uint32_t osf) {
         os_factor = osf;
+        aa_fir.rebuild_lowpass(aa_fir_taps, os_factor);
+    }
+
+    void set_aa_fir_taps(size_t taps) {
+        aa_fir_taps = taps;
+        aa_fir.rebuild_lowpass(aa_fir_taps, os_factor);
     }
 
     void set_sample(mod_sample_t *s) {
@@ -252,6 +298,10 @@ struct efx_status_t {
     uint8_t note_delay_tick = 0;
     float note_delay_period = 0;
     int note_delay_sample = 0;
+
+    int arp_pos = 0;
+    bool arp_status = false;
+    bool arp_status_last = false;
 };
 
 class MOD_TRACKER {
@@ -277,6 +327,9 @@ private:
     std::vector<std::vector<int16_t>> mix_buf;
 
     int pattern_break = -1;
+    int pattern_loop = -1;
+    int pattern_loop_start = 0;
+    int pattern_loop_count = 0;
 
 public:
     void set_tempo(uint8_t t) {
@@ -404,12 +457,38 @@ public:
     }
 
     void process_tick_efx(int c) {
+        chan_efx[c].arp_status_last = chan_efx[c].arp_status;
+        chan_efx[c].arp_status = false;
         chan_efx[c].vibrato_status_last = chan_efx[c].vibrato_enable;
         chan_efx[c].vibrato_enable = false;
         chan_efx[c].tremolo_status_last = chan_efx[c].tremolo_enable;
         chan_efx[c].tremolo_enable = false;
 
         switch (chan_efx[c].cmd) {
+        case 0x0: // Arpeggio
+            if (chan_efx[c].par == 0) {
+                break;
+            }
+            chan_efx[c].arp_status = true;
+            switch (chan_efx[c].arp_pos) {
+            case 0:
+                channels[c].set_period(chan_efx[c].base_period);
+                break;
+
+            case 1:
+                channels[c].set_period(transpose_period(chan_efx[c].base_period, U8_HI(chan_efx[c].par)));
+                break;
+
+            case 2:
+                channels[c].set_period(transpose_period(chan_efx[c].base_period, U8_LO(chan_efx[c].par)));
+                break;
+            }
+            chan_efx[c].arp_pos++;
+            if (chan_efx[c].arp_pos > 2) {
+                chan_efx[c].arp_pos = 0;
+            }
+            break;
+
         case 0x1: // Portamento Up
             channels[c].set_period(channels[c].get_period() - chan_efx[c].porta_up);
             chan_efx[c].base_period = channels[c].get_period();
@@ -489,6 +568,11 @@ public:
             }
         }
 
+        if ((chan_efx[c].arp_status_last == true) && (chan_efx[c].arp_status == false)) { // falling edge
+            chan_efx[c].arp_pos = 0;
+            channels[c].set_period(chan_efx[c].base_period);
+            // printf("C%d: ARP END\n", c);
+        }
         // Fucking the vibrato and tremolo....XD
         // Anyway, this is a handler for vibrato
         if ((chan_efx[c].vibrato_status_last == true) && (chan_efx[c].vibrato_enable == false)) { // falling edge
@@ -538,6 +622,12 @@ public:
         // printf("C%d: EFX %1X%02X\n", c, cmd, par);
         switch (chan_efx[c].cmd)
         {
+        case 0x0: // SET ARP
+            if (par == 0) {
+                break;
+            }
+            chan_efx[c].arp_pos = 1;
+            break;
         case 0x1: // SET PORTAMENTO UP
             if (par) {
                 chan_efx[c].porta_up = par;
@@ -607,8 +697,6 @@ public:
             break;
 
         case 0xD: // SET PATTERN BREAK
-            // pos++;
-            // row = par;
             pattern_break = par;
             printf("GLOBAL: PATTERN BREAK -> %d\n", par);
             break;
@@ -637,6 +725,29 @@ public:
                 case 0x5: // SET FINETUNE
                     channels[c].set_finetune((int8_t)(E_par ^ 0x08) - 0x08);
                     // printf("C%d: SET FINETUNE -> %d\n", c, channels[c].get_finetune());
+                    break;
+
+                case 0x6: // PATTERN LOOP
+                    if (E_par == 0) {
+                        pattern_loop_start = row;
+                        printf("Pattern Loop Start: %d\n", pattern_loop_start);
+                    } else {
+                        if (pattern_loop_count == 0) {
+                            pattern_loop_count = E_par;
+                        } else {
+                            pattern_loop_count--;
+                        }
+
+                        if (pattern_loop_count != 0) {
+                            pattern_loop = pattern_loop_start;
+                            printf("Pattern Loop Jump -> row %d, count left: %d\n",
+                                    pattern_loop, pattern_loop_count);
+                        } else {
+                            printf("Pattern Loop End\n");
+                        }
+                    }
+
+                    printf("C%d: SET PATTERN LOOP -> %d\n", c, E_par);
                     break;
 
                 case 0x7: // SET TREMOLO WAVEFORM
@@ -673,6 +784,13 @@ public:
                     // printf("C%d: SET NOTE DELAY -> %d\n", c, E_par);
                     break;
 
+                case 0xE: // PATTERN DELAY
+                    printf("C%d: UNSUPPORTED PATTERN DELAY :P\n", c);
+                    // I analyzed over 10000 .mod files,
+                    // and found that only about 2% of them used the EEx command,
+                    // so I decided not to bother with it XD
+                    break;
+
                 default:
                     break;
                 }
@@ -701,9 +819,17 @@ public:
             row = pattern_break;
             pattern_break = -1;
         }
+        if (pattern_loop >= 0) {
+            row = pattern_loop;
+            pattern_loop = -1;
+        }
         printf("%02d:%02d | ", pos, row);
         for (int c = 0; c < get_num_channel(); c++) {
             note_t *note = mod->get_note_order(pos, c, row);
+            if (note == NULL) {
+                printf("WARN: Null note on P=%d, C=%d, R=%d\n", pos, c, row);
+                continue;
+            }
             if (note->period) {
                 char note_str[4];
                 mod_period_to_note_str(note->period, note_str);
@@ -732,7 +858,7 @@ public:
         for (int c = 0; c < get_num_channel(); c++) {
             note_t *note = mod->get_note_order(pos, c, row);
             if (note == NULL) {
-                printf("WARN: Null note on P=%d, C=%d, R=%d\n", pos, c, row);
+                // printf("WARN: Null note on P=%d, C=%d, R=%d\n", pos, c, row);
                 continue;
             }
 
@@ -769,9 +895,14 @@ public:
             reset();
         } else {
             row++;
-            if (row >= mod->get_pattern_size(pos)) {
+            if (row >= mod->get_pattern_size(mod->get_order(pos))) {
                 row = 0;
                 pos++;
+
+                pattern_loop_start = 0;
+                pattern_loop_count = 0;
+                pattern_loop = -1;
+
                 printf("frame(%d)\033[2J\033[H", pos);
             }
         }

@@ -280,6 +280,10 @@ int MOD_FILE::get_order(int i) {
     return order_list[i];
 }
 
+int MOD_FILE::get_order_size() {
+    return order_list.size();
+}
+
 void MOD_FILE::print_pattern_data(int p) {
     if (p < 0 || (size_t)p >= patterns.size()) {
         printf("invalid pattern: %d\n", p);
