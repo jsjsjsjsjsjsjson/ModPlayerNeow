@@ -29,6 +29,7 @@ add_executable(ModPlayerNeow
     src/binio_helper.c
     src/mod_helper.c
     src/LFO.cpp
+    src/WAV.cpp
     src/FIRFilter.cpp
     src/mod_file.cpp
     src/main.cpp
