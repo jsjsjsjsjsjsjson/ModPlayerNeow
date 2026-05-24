@@ -6,6 +6,7 @@
 #include "mod_helper.h"
 #include "LFO.h"
 #include "mod_file.h"
+#include "audio_type.h"
 
 #include "FIRFilter.h"
 
@@ -16,6 +17,13 @@
 #else
     #define MASTER_CLOCK_FREQ 3546895.0f
 #endif
+
+static const uint8_t amiga_pan_default[4] = {
+    96,     // ch0 / MOD channel 1: left
+    160,    // ch1 / MOD channel 2: right
+    160,    // ch2 / MOD channel 3: right
+    96      // ch3 / MOD channel 4: left
+};
 
 static inline int16_t softclip(int32_t x) {
     if (x > 32767)
@@ -146,7 +154,7 @@ public:
         return period;
     }
 
-    void process_block(int16_t *buf, size_t buf_size) {
+    void process_block(audio16_mono_t *buf, size_t buf_size) {
         // No activity optimization
         if (!active) {
             return;
@@ -422,6 +430,7 @@ private:
 
     std::vector<MOD_CHANNEL> channels;
     std::vector<efx_status_t> chan_efx;
+    std::vector<int16_t> chan_pan;
 
     uint8_t tempo = 125;
     uint8_t ticks_row = 6;
@@ -438,7 +447,7 @@ private:
     int song_loop = -1;
     bool song_finished = false;
 
-    std::vector<std::vector<int16_t>> mix_buf;
+    std::vector<std::vector<audio16_mono_t>> mix_buf;
 
     int pattern_break = -1;
     int pattern_loop = -1;
@@ -446,6 +455,11 @@ private:
     int pattern_loop_count = 0;
 
 public:
+    MOD_TRACKER() {
+        realloc_channels(4);
+        pause();
+    }
+
     void set_tempo(uint8_t t) {
         tempo = t;
         samples_tick = roundf((float)samp_rate * (2.5f / (float)tempo));
@@ -489,8 +503,11 @@ public:
         channels.resize(num_chan);
         chan_efx.clear();
         chan_efx.resize(num_chan);
+        chan_pan.clear();
+        chan_pan.resize(num_chan);
         for (int i = 0; i < channels.size(); i++) {
             channels[i].set_sample_rate(samp_rate);
+            chan_pan[i] = amiga_pan_default[i & 3];
         }
         mix_buf.resize(channels.size());
     }
@@ -816,6 +833,11 @@ public:
             }
             break;
 
+        case 0x8: // Set Panning, PC MOD extension
+            chan_pan[c] = par;
+            // printf("C%d: SET PAN -> %d\n", c, par);
+            break;
+
         case 0x9: // SET SAMPLE OFFSET
             channels[c].start();
             channels[c].set_sample_offset((int)par * 256);
@@ -1061,39 +1083,61 @@ public:
         }
     }
 
-    void mixer(int16_t *buf, size_t buf_size) {
+    void mixer(audio16_t *buf, size_t frames) {
         for (int c = 0; c < get_num_channel(); c++) {
-            if (mix_buf[c].size() != buf_size) {
-                mix_buf[c].resize(buf_size);
+            if (mix_buf[c].size() != frames) {
+                mix_buf[c].resize(frames);
             }
 
-            channels[c].process_block(mix_buf[c].data(), buf_size);
+            memset(mix_buf[c].data(), 0, frames * sizeof(int16_t));
+            channels[c].process_block(mix_buf[c].data(), frames);
         }
 
-        for (size_t i = 0; i < buf_size; i++) {
-            int32_t mix = 0;
+        for (size_t i = 0; i < frames; i++) {
+            int32_t mix_l = 0;
+            int32_t mix_r = 0;
+
             for (int c = 0; c < mix_buf.size(); c++) {
-                if (channels[c].get_active() && channels[c].get_volume()) mix += mix_buf[c][i];
+                if (!channels[c].get_active() || !channels[c].get_volume())
+                    continue;
+
+                int32_t s = mix_buf[c][i];
+
+                /*
+                    pan:
+                    0   = left
+                    128 = center
+                    255 = right
+                */
+                int16_t pan = chan_pan[c];
+
+                int16_t gain_l = 256 - pan;
+                int16_t gain_r = pan;
+
+                mix_l += (s * gain_l) >> 8;
+                mix_r += (s * gain_r) >> 8;
             }
-            buf[i] = softclip(mix);
+
+            buf[i].l = softclip(mix_l);
+            buf[i].r = softclip(mix_r);
         }
     }
 
-    void process_block(int16_t *buf, size_t buf_size) {
+    void process_block(audio16_t *buf, size_t frames) {
         if (!active || mod == nullptr || samples_tick == 0) {
-            memset(buf, 0, buf_size * sizeof(int16_t));
+            memset(buf, 0, frames * sizeof(audio16_t));
             return;
         }
 
         size_t done = 0;
 
-        while (done < buf_size) {
+        while (done < frames) {
             if (samples_left_tick == 0) {
                 next_tick();
                 samples_left_tick = samples_tick;
             }
 
-            size_t n = buf_size - done;
+            size_t n = frames - done;
             if (n > samples_left_tick)
                 n = samples_left_tick;
 

@@ -25,6 +25,8 @@ target_link_libraries(ThinMix PUBLIC
     ${PORTAUDIO_LIBRARIES}
 )
 
+target_compile_options(ThinMix PRIVATE -O3 -ffast-math)
+
 add_executable(ModPlayerNeow
     src/binio_helper.c
     src/mod_helper.c
@@ -34,5 +36,7 @@ add_executable(ModPlayerNeow
     src/mod_file.cpp
     src/main.cpp
 )
+
+target_compile_options(ModPlayerNeow PRIVATE -O3)
 
 target_link_libraries(ModPlayerNeow ThinMix)

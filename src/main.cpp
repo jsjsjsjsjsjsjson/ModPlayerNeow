@@ -8,8 +8,10 @@
 #include "ThinMix.h"
 #include "WAV.h"
 
+#include "audio_type.h"
+
 #define SAMP_RATE 48000
-#define BUF_FRAMES 128
+#define BUF_FRAMES 256
 
 MOD_FILE mod;
 
@@ -72,14 +74,14 @@ static void init_tracker(MOD_TRACKER *tracker) {
 static int export_wav(const char *wav_path) {
     MOD_TRACKER tracker;
     WAV wav;
-    int16_t buf[BUF_FRAMES];
+    audio16_t buf[BUF_FRAMES];
     int r;
 
     init_tracker(&tracker);
 
     tracker.set_song_loop(0);
 
-    r = wav.open_write(wav_path, SAMP_RATE, 1);
+    r = wav.open_write(wav_path, SAMP_RATE, 2);
     if (r != WAV_OK) {
         printf("wav.open_write failed: %s\n", WAV::result_string(r));
         return -1;
@@ -88,7 +90,7 @@ static int export_wav(const char *wav_path) {
     while (!tracker.get_song_finished()) {
         tracker.process_block(buf, BUF_FRAMES);
 
-        if (wav.write_frames_s16(buf, BUF_FRAMES) != BUF_FRAMES) {
+        if (wav.write_frames_s16((int16_t*)buf, BUF_FRAMES) != BUF_FRAMES) {
             printf("wav.write_frames_s16 failed\n");
             wav.close();
             return -1;
@@ -110,7 +112,7 @@ static int play_realtime() {
     tm_stream_t *stream = NULL;
 
     MOD_TRACKER tracker;
-    int16_t buf[BUF_FRAMES];
+    audio16_t buf[BUF_FRAMES];
     uint32_t written = 0;
 
     tm_config_default(&cfg);
@@ -138,7 +140,7 @@ static int play_realtime() {
     tm_stream_config_default(&scfg);
 
     scfg.gain_q15 = TM_Q15_HALF;
-    scfg.channels = TM_CHANNELS_MONO;
+    scfg.channels = TM_CHANNELS_STEREO;
     scfg.sample_format = TM_SAMPLE_S16;
 
     r = tm_create_stream(tm, &scfg, &stream);
