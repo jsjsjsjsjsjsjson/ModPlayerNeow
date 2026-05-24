@@ -39,7 +39,7 @@ int main() {
 
     char err_buf[64];
 
-    if (mod.open("PRODIGY - Junglelism.mod")) {
+    if (mod.open("playing_with_bleeps.mod")) {
         tm_destroy(tm);
         return -2;
     }

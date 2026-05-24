@@ -40,7 +40,7 @@ static inline int16_t softclip(int32_t x) {
 class MOD_CHANNEL {
 private:
     uint32_t samp_rate = 0;
-    int os_factor = 4; // "os" means "Over Sample"
+    int os_factor = 8; // "os" means "Over Sample"
 
     mod_sample_t *smp = NULL;
 
@@ -276,6 +276,8 @@ private:
 
     std::vector<std::vector<int16_t>> mix_buf;
 
+    int pattern_break = -1;
+
 public:
     void set_tempo(uint8_t t) {
         tempo = t;
@@ -463,7 +465,7 @@ public:
             chan_efx[c].note_cut_tick--;
             if (chan_efx[c].note_cut_tick == 0) {
                 channels[c].set_volume(0);
-                printf("C%d: NOTE CUT\n", c);
+                // printf("C%d: NOTE CUT\n", c);
             }
         } else if (chan_efx[c].note_delay_tick) {
             chan_efx[c].note_delay_tick--;
@@ -476,14 +478,14 @@ public:
                     channels[c].set_sample(mod->get_sample(chan_efx[c].note_delay_sample));
                     chan_efx[c].note_delay_sample = 0;
                 }
-                printf("C%d: DELAY NOTE TRIG\n", c);
+                // printf("C%d: DELAY NOTE TRIG\n", c);
             }
         } else if ((chan_efx[c].cmd == 0xE) && (U8_HI(chan_efx[c].par) == 0x9)) { // RETRIG NOTE
             chan_efx[c].retrig_note_tick--;
             if (chan_efx[c].retrig_note_tick == 0) {
                 channels[c].start();
                 chan_efx[c].retrig_note_tick = chan_efx[c].retrig_note;
-                printf("C%d: RETRIG\n", c);
+                // printf("C%d: RETRIG\n", c);
             }
         }
 
@@ -492,7 +494,7 @@ public:
         if ((chan_efx[c].vibrato_status_last == true) && (chan_efx[c].vibrato_enable == false)) { // falling edge
             chan_efx[c].vibrato.reset_phase();
             channels[c].set_period(chan_efx[c].base_period);
-            printf("C%d: VIBRATE END\n", c);
+            // printf("C%d: VIBRATE END\n", c);
         }
         if (chan_efx[c].vibrato_enable) {
             int16_t delta = chan_efx[c].vibrato.next_vibrato_delta();
@@ -503,7 +505,7 @@ public:
         if ((chan_efx[c].tremolo_status_last == true) && (chan_efx[c].tremolo_enable == false)) { // falling edge
             chan_efx[c].tremolo.reset_phase();
             channels[c].set_volume(chan_efx[c].base_volume);
-            printf("C%d: TREMOLO END\n", c);
+            // printf("C%d: TREMOLO END\n", c);
         }
         if (chan_efx[c].tremolo_enable) {
             int16_t delta = chan_efx[c].tremolo.next_tremolo_delta();
@@ -533,27 +535,27 @@ public:
         if (!(cmd || par)) {
             return;
         }
-        printf("C%d: EFX %1X%02X\n", c, cmd, par);
+        // printf("C%d: EFX %1X%02X\n", c, cmd, par);
         switch (chan_efx[c].cmd)
         {
         case 0x1: // SET PORTAMENTO UP
             if (par) {
                 chan_efx[c].porta_up = par;
-                printf("C%d: SET PORTAMENTO UP -> %d\n", c, par);
+                // printf("C%d: SET PORTAMENTO UP -> %d\n", c, par);
             }
             break;
 
         case 0x2: // SET PORTAMENTO DOWN
             if (par) {
                 chan_efx[c].porta_down = par;
-                printf("C%d: SET PORTAMENTO DOWN -> %d\n", c, par);
+                // printf("C%d: SET PORTAMENTO DOWN -> %d\n", c, par);
             }
             break;
 
         case 0x3: // SET TONE PORTAMENTO
             if (par) {
                 chan_efx[c].tone_porta_speed = par;
-                printf("C%d: SET TONE PORTAMENTO, SPEED -> %d\n", c, par);
+                // printf("C%d: SET TONE PORTAMENTO, SPEED -> %d\n", c, par);
             }
             break;
 
@@ -561,21 +563,21 @@ public:
             chan_efx[c].vibrato_enable = true;
             if (par) {
                 chan_efx[c].vibrato.set_param(par);
-                printf("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
+                // printf("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
             }
             break;
 
         case 0x5: // SET VOLUME SLIDE
             // if (par)
                 chan_efx[c].vol_slide_par = par;
-                printf("C%d: SET VOLUME SLIDE -> +%d -%d, TONE PORTAMENTO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
+                // printf("C%d: SET VOLUME SLIDE -> +%d -%d, TONE PORTAMENTO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
             break;
 
         case 0x6: // SET VOLUME SLIDE + VIBRATO
             chan_efx[c].vibrato_enable = true;
             // if (par)
                 chan_efx[c].vol_slide_par = par;
-                printf("C%d: SET VOLUME SLIDE -> +%d -%d, VIBRATO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
+                // printf("C%d: SET VOLUME SLIDE -> +%d -%d, VIBRATO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
             break;
 
         case 0x7: // SET TREMOLOS
@@ -583,29 +585,31 @@ public:
             chan_efx[c].base_volume = channels[c].get_volume();
             if (par) {
                 chan_efx[c].tremolo.set_param(par);
-                printf("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
+                // printf("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
             }
             break;
 
         case 0x9: // SET SAMPLE OFFSET
-            channels[c].set_sample_offset(par << 8);
-            printf("C%d: SET SAMPLE OFFSET -> %d\n", c, par << 8);
+            channels[c].start();
+            channels[c].set_sample_offset((int)par * 256);
+            // printf("C%d: SET SAMPLE OFFSET -> %d\n", c, par << 8);
             break;
 
         case 0xA: // SET VOLUME SLIDE
             // if (par)
                 chan_efx[c].vol_slide_par = par;
-                printf("C%d: SET VOLUME SLIDE -> +%d -%d\n", c, U8_HI(par), U8_LO(par));
+                // printf("C%d: SET VOLUME SLIDE -> +%d -%d\n", c, U8_HI(par), U8_LO(par));
             break;
 
         case 0xC: // SET VOLUME
             channels[c].set_volume(par);
-            printf("C%d: SET VOLUME -> %d\n", c, par);
+            // printf("C%d: SET VOLUME -> %d\n", c, par);
             break;
 
         case 0xD: // SET PATTERN BREAK
-            pos++;
-            row = par;
+            // pos++;
+            // row = par;
+            pattern_break = par;
             printf("GLOBAL: PATTERN BREAK -> %d\n", par);
             break;
 
@@ -616,44 +620,44 @@ public:
                 case 0x1: // FINE SLIDE UP
                     channels[c].set_period(channels[c].get_period() - E_par);
                     chan_efx[c].base_period = channels[c].get_period();
-                    printf("C%d: FINE SLIDE UP -> %d\n", c, E_par);
+                    // printf("C%d: FINE SLIDE UP -> %d\n", c, E_par);
                     break;
 
                 case 0x2: // FINE SLIDE DOWN
                     channels[c].set_period(channels[c].get_period() + E_par);
                     chan_efx[c].base_period = channels[c].get_period();
-                    printf("C%d: FINE SLIDE DOWN -> %d\n", c, E_par);
+                    // printf("C%d: FINE SLIDE DOWN -> %d\n", c, E_par);
                     break;
 
                 case 0x4: // SET VIBRATO WAVEFORM
                     chan_efx[c].vibrato.set_waveform(E_par);
-                    printf("C%d: SET VIBRATO WAVEFORM -> %d\n", c, E_par);
+                    // printf("C%d: SET VIBRATO WAVEFORM -> %d\n", c, E_par);
                     break;
 
                 case 0x5: // SET FINETUNE
                     channels[c].set_finetune((int8_t)(E_par ^ 0x08) - 0x08);
-                    printf("C%d: SET FINETUNE -> %d\n", c, channels[c].get_finetune());
+                    // printf("C%d: SET FINETUNE -> %d\n", c, channels[c].get_finetune());
                     break;
 
                 case 0x7: // SET TREMOLO WAVEFORM
                     chan_efx[c].tremolo.set_waveform(E_par);
-                    printf("C%d: SET TREMOLO WAVEFORM -> %d\n", c, E_par);
+                    // printf("C%d: SET TREMOLO WAVEFORM -> %d\n", c, E_par);
                     break;
 
                 case 0x9: // RETRIG NOTE
                     chan_efx[c].retrig_note = E_par;
                     chan_efx[c].retrig_note_tick = E_par;
-                    printf("C%d: SET RETRIG NOTE -> %d\n", c, E_par);
+                    // printf("C%d: SET RETRIG NOTE -> %d\n", c, E_par);
                     break;
 
                 case 0xA: // FINE VOLUME SLIDE UP
                     channels[c].set_volume(channels[c].get_volume() + E_par);
-                    printf("C%d: FINE VOLUME SLIDE UP -> %d\n", c, E_par);
+                    // printf("C%d: FINE VOLUME SLIDE UP -> %d\n", c, E_par);
                     break;
 
                 case 0xB: // FINE VOLUME SLIDE DOWN
                     channels[c].set_volume(channels[c].get_volume() - E_par);
-                    printf("C%d: FINE VOLUME SLIDE DOWN -> %d\n", c, E_par);
+                    // printf("C%d: FINE VOLUME SLIDE DOWN -> %d\n", c, E_par);
                     break;
 
                 case 0xC: // SET NOTE CUT TICK
@@ -661,12 +665,12 @@ public:
                     if (E_par == 0) {
                         channels[c].set_volume(0);
                     }
-                    printf("C%d: SET NOTE CUT TICK -> %d\n", c, E_par);
+                    // printf("C%d: SET NOTE CUT TICK -> %d\n", c, E_par);
                     break;
 
                 case 0xD: // NOTE DELAY
                     chan_efx[c].note_delay_tick = E_par;
-                    printf("C%d: SET NOTE DELAY -> %d\n", c, E_par);
+                    // printf("C%d: SET NOTE DELAY -> %d\n", c, E_par);
                     break;
 
                 default:
@@ -686,12 +690,45 @@ public:
             break;
 
         default:
-            // printf("C%d: UNKNOW EFX %1X%02X\n", c, cmd, par);
+            // // printf("C%d: UNKNOW EFX %1X%02X\n", c, cmd, par);
             break;
         }
     }
 
     void next_row() {
+        if (pattern_break >= 0) {
+            pos++;
+            row = pattern_break;
+            pattern_break = -1;
+        }
+        printf("%02d:%02d | ", pos, row);
+        for (int c = 0; c < get_num_channel(); c++) {
+            note_t *note = mod->get_note_order(pos, c, row);
+            if (note->period) {
+                char note_str[4];
+                mod_period_to_note_str(note->period, note_str);
+                printf("%.3s ", note_str);
+            } else {
+                printf("    ");
+            }
+            if (note->sample) {
+                printf("%02d ", note->sample+1);
+            } else {
+                printf("   ");
+            }
+            if (note->efx_cmd) {
+                printf("%.1X", note->efx_cmd);
+            } else {
+                printf(" ");
+            }
+            if (note->efx_par) {
+                printf("%02X ", note->efx_par);
+            } else {
+                printf("   ");
+            }
+            printf(" ");
+        }
+        printf("\n");
         for (int c = 0; c < get_num_channel(); c++) {
             note_t *note = mod->get_note_order(pos, c, row);
             if (note == NULL) {
@@ -702,7 +739,7 @@ public:
             if (note->period) {
                 if ((note->efx_cmd == 0x3) || (note->efx_cmd == 0x5)) {
                     chan_efx[c].tone_porta_target_period = note->period;
-                    printf("C%d: SET TONEPORTAMENTO TARGET -> %d\n", c, note->period);
+                    // printf("C%d: SET TONEPORTAMENTO TARGET -> %d\n", c, note->period);
                 } else if ((note->efx_cmd == 0xE) && (U8_HI(note->efx_par) == 0xD)) {
                     chan_efx[c].note_delay_period = note->period;
                     continue;
@@ -726,7 +763,7 @@ public:
             }
             process_row_efx(c, note->efx_cmd, note->efx_par);
         }
-        if (mod->get_pattern_size(pos) < 0) {
+        if (mod->get_order(pos) < 0) {
             printf("WARN: Pos (%d) out of the song\n", pos);
             row = 0;
             reset();
@@ -735,7 +772,7 @@ public:
             if (row >= mod->get_pattern_size(pos)) {
                 row = 0;
                 pos++;
-                printf("frame ()\n");
+                printf("frame(%d)\033[2J\033[H", pos);
             }
         }
     }

@@ -1,4 +1,5 @@
 #include "mod_helper.h"
+#include <math.h>
 #include <string.h>
 
 void mod_period_to_note_str(int period, char *buf) {
@@ -24,4 +25,8 @@ void mod_period_to_note_str(int period, char *buf) {
     buf[1] = n[1];
     buf[2] = '1' + (ni / 12);
     buf[3] = '\0';
+}
+
+float transpose_period(float period, int semitone) {
+    return period * powf(2.0f, -(float)semitone / 12.0f);
 }
