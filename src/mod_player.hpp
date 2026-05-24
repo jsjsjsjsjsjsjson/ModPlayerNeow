@@ -435,6 +435,8 @@ private:
     uint32_t tick_count = 0;
 
     bool active = false;
+    int song_loop = -1;
+    bool song_finished = false;
 
     std::vector<std::vector<int16_t>> mix_buf;
 
@@ -513,6 +515,22 @@ public:
         return pos;
     }
 
+    void set_song_loop(int loop) {
+        song_loop = loop;
+    }
+
+    int get_song_loop() {
+        return song_loop;
+    }
+
+    bool get_song_finished() {
+        return song_finished;
+    }
+
+    bool get_active() {
+        return active;
+    }
+
     void start() {
         active = true;
     }
@@ -523,15 +541,18 @@ public:
 
     void reset() {
         pause();
+        song_finished = false;
         samples_left_tick = 0;
         tick_count = 0;
-        set_frame_pos(0);
-        set_row(0);
+        pos = 0;
+        row = 0;
+        song_loop = -1;
         realloc_channels(mod->get_num_channel());
     }
 
-    bool get_active() {
-        return active;
+    void finish_song() {
+        active = false;
+        song_finished = true;
     }
 
     void init_mod(MOD_FILE *m) {
@@ -1010,22 +1031,33 @@ public:
             }
             process_row_efx(c, note->efx_cmd, note->efx_par);
         }
-        if (mod->get_order(pos) < 0) {
-            printf("WARN: Pos (%d) out of the song\n", pos);
+        row++;
+        if (row >= mod->get_pattern_size(mod->get_order(pos))) {
             row = 0;
-            reset();
-        } else {
-            row++;
-            if (row >= mod->get_pattern_size(mod->get_order(pos))) {
-                row = 0;
-                pos++;
+            pos++;
 
-                pattern_loop_start = 0;
-                pattern_loop_count = 0;
-                pattern_loop = -1;
-
-                printf("frame(%d)\033[2J\033[H", pos);
+            if (pos >= mod->get_order_size()) {
+                if (song_loop < 0) {
+                    // infinite loop
+                    pos = 0;
+                    row = 0;
+                } else if (song_loop > 0) {
+                    // finite loop
+                    pos = 0;
+                    row = 0;
+                    song_loop--;
+                } else {
+                    // no loop
+                    finish_song();
+                    return;
+                }
             }
+
+            pattern_loop_start = 0;
+            pattern_loop_count = 0;
+            pattern_loop = -1;
+
+            printf("frame(%d)\033[2J\033[H", pos);
         }
     }
 
