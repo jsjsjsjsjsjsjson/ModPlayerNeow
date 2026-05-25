@@ -24,7 +24,7 @@ static void print_usage(const char *argv0) {
 static int parse_args(int argc, char **argv, const char **mod_path, const char **wav_path) {
     int i;
 
-    *mod_path = "urea.mod";
+    *mod_path = "ducc_-_our_great_minds.mod";
     *wav_path = NULL;
 
     for (i = 1; i < argc; i++) {

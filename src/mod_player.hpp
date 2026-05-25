@@ -12,6 +12,7 @@
 
 // #define NTSC_AMIGA
 #define DEBUG_PRINT_ENABLED 0
+#define MUTE_WHEN_FREQ_OUT_OF_RANGE 0
 
 #define DEBUG_PRINTF(fmt, ...) \
     do { \
@@ -183,10 +184,14 @@ public:
 
         if (freq < 4181) {
             DEBUG_PRINTF("WARN: Freq too low (%d)\n", (int)freq);
-            goto zero_buf;
+            if (MUTE_WHEN_FREQ_OUT_OF_RANGE) {
+                goto zero_buf;
+            }
         } else if (freq > 31680) {
             DEBUG_PRINTF("WARN: Freq too high (%d)\n", (int)freq);
-            goto zero_buf;
+            if (MUTE_WHEN_FREQ_OUT_OF_RANGE) {
+                goto zero_buf;
+            }
         }
 
         if (samp_rate < 4000) {
