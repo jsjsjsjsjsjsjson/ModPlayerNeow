@@ -11,6 +11,14 @@
 #include "FIRFilter.h"
 
 // #define NTSC_AMIGA
+#define DEBUG_PRINT_ENABLED 0
+
+#define DEBUG_PRINTF(fmt, ...) \
+    do { \
+        if (DEBUG_PRINT_ENABLED) { \
+            printf(fmt, ##__VA_ARGS__); \
+        } \
+    } while (0)
 
 #ifdef NTSC_AMIGA
     #define MASTER_CLOCK_FREQ 3579545.0f
@@ -174,20 +182,20 @@ public:
         }
 
         if (freq < 4181) {
-            printf("WARN: Freq too low (%d)\n", (int)freq);
+            DEBUG_PRINTF("WARN: Freq too low (%d)\n", (int)freq);
             goto zero_buf;
         } else if (freq > 31680) {
-            printf("WARN: Freq too high (%d)\n", (int)freq);
+            DEBUG_PRINTF("WARN: Freq too high (%d)\n", (int)freq);
             goto zero_buf;
         }
 
         if (samp_rate < 4000) {
-            printf("ERR: Sample rate too low (%d)\n", samp_rate);
+            DEBUG_PRINTF("ERR: Sample rate too low (%d)\n", samp_rate);
             goto zero_buf;
         }
 
         if (os_factor == 0) {
-            printf("ERR: OverSample factor too low (%d)\n", os_factor);
+            DEBUG_PRINTF("ERR: OverSample factor too low (%d)\n", os_factor);
             goto zero_buf;
         }
 
@@ -269,7 +277,7 @@ public:
 
     void set_sample(mod_sample_t *s) {
         if (s == NULL) {
-            printf("WARN: set_sample(NULL)\n");
+            DEBUG_PRINTF("WARN: set_sample(NULL)\n");
             smp = NULL;
             return;
         }
@@ -277,7 +285,7 @@ public:
         vol = smp->volume;
         invert_loop_acc = 0;
         rebuild_invert_loop_flags();
-        // printf("set_sample(%p)\n", smp);
+        DEBUG_PRINTF("set_sample(%p)\n", smp);
     }
 
     void set_sample_offset(uint32_t ofst) {
@@ -288,7 +296,7 @@ public:
     void clear_sample() {
         smp = NULL;
         stop();
-        printf("clear_sample()\n");
+        DEBUG_PRINTF("clear_sample()\n");
     }
 
     void set_freq(float f) {
@@ -303,19 +311,19 @@ public:
 
     void set_period(float p) {
         period = p;
-        freq = MASTER_CLOCK_FREQ / apply_finetune(p, finetune);
+        freq = MASTER_CLOCK_FREQ / apply_finetune(p, finetune + (smp ? smp->finetune : 0));
         p_c = freq / (float)samp_rate;
     }
 
     void set_volume(int v) {
         if (v > 64) v = 64; else if (v < 0) v = 0;
         vol = v;
-        // printf("set_volume(%d)\n", vol);
+        // DEBUG_PRINTF("set_volume(%d)\n", vol);
     }
 
     void set_finetune(int8_t ft) {
         finetune = ft;
-        freq = MASTER_CLOCK_FREQ / apply_finetune(period, finetune);
+        freq = MASTER_CLOCK_FREQ / apply_finetune(period, finetune + (smp ? smp->finetune : 0));
     }
 
     int8_t get_finetune() {
@@ -694,7 +702,7 @@ public:
             chan_efx[c].note_cut_tick--;
             if (chan_efx[c].note_cut_tick == 0) {
                 channels[c].set_volume(0);
-                // printf("C%d: NOTE CUT\n", c);
+                DEBUG_PRINTF("C%d: NOTE CUT\n", c);
             }
         } else if (chan_efx[c].note_delay_tick) {
             chan_efx[c].note_delay_tick--;
@@ -707,44 +715,44 @@ public:
                     channels[c].set_sample(mod->get_sample(chan_efx[c].note_delay_sample));
                     chan_efx[c].note_delay_sample = 0;
                 }
-                // printf("C%d: DELAY NOTE TRIG\n", c);
+                DEBUG_PRINTF("C%d: DELAY NOTE TRIG\n", c);
             }
         } else if ((chan_efx[c].cmd == 0xE) && (U8_HI(chan_efx[c].par) == 0x9)) { // RETRIG NOTE
             chan_efx[c].retrig_note_tick--;
             if (chan_efx[c].retrig_note_tick == 0) {
                 channels[c].start();
                 chan_efx[c].retrig_note_tick = chan_efx[c].retrig_note;
-                // printf("C%d: RETRIG\n", c);
+                DEBUG_PRINTF("C%d: RETRIG\n", c);
             }
         }
 
         if ((chan_efx[c].arp_status_last == true) && (chan_efx[c].arp_status == false)) { // falling edge
             chan_efx[c].arp_pos = 0;
             channels[c].set_period(chan_efx[c].base_period);
-            // printf("C%d: ARP END\n", c);
+            DEBUG_PRINTF("C%d: ARP END\n", c);
         }
         // Fucking the vibrato and tremolo....XD
         // Anyway, this is a handler for vibrato
         if ((chan_efx[c].vibrato_status_last == true) && (chan_efx[c].vibrato_enable == false)) { // falling edge
             chan_efx[c].vibrato.reset_phase();
             channels[c].set_period(chan_efx[c].base_period);
-            // printf("C%d: VIBRATE END\n", c);
+            DEBUG_PRINTF("C%d: VIBRATE END\n", c);
         }
         if (chan_efx[c].vibrato_enable) {
             int16_t delta = chan_efx[c].vibrato.next_vibrato_delta();
             channels[c].set_period(chan_efx[c].base_period + (float)delta);
-            // printf("VIBRATO: %f + %d = %f\n", chan_efx[c].base_period, delta, channels[c].get_period());
+            // DEBUG_PRINTF("VIBRATO: %f + %d = %f\n", chan_efx[c].base_period, delta, channels[c].get_period());
         }
         // , and this one for tremolo.
         if ((chan_efx[c].tremolo_status_last == true) && (chan_efx[c].tremolo_enable == false)) { // falling edge
             chan_efx[c].tremolo.reset_phase();
             channels[c].set_volume(chan_efx[c].base_volume);
-            // printf("C%d: TREMOLO END\n", c);
+            DEBUG_PRINTF("C%d: TREMOLO END\n", c);
         }
         if (chan_efx[c].tremolo_enable) {
             int16_t delta = chan_efx[c].tremolo.next_tremolo_delta();
             channels[c].set_volume(chan_efx[c].base_volume + delta);
-            // printf("TREMOLO: %d + %d = %d\n", chan_efx[c].base_volume, delta, channels[c].get_volume());
+            // DEBUG_PRINTF("TREMOLO: %d + %d = %d\n", chan_efx[c].base_volume, delta, channels[c].get_volume());
         }
     }
 
@@ -773,7 +781,7 @@ public:
         if (!(cmd || par)) {
             return;
         }
-        // printf("C%d: EFX %1X%02X\n", c, cmd, par);
+        DEBUG_PRINTF("C%d: EFX %1X%02X\n", c, cmd, par);
         switch (chan_efx[c].cmd)
         {
         case 0x0: // SET ARP
@@ -785,21 +793,21 @@ public:
         case 0x1: // SET PORTAMENTO UP
             if (par) {
                 chan_efx[c].porta_up = par;
-                // printf("C%d: SET PORTAMENTO UP -> %d\n", c, par);
+                DEBUG_PRINTF("C%d: SET PORTAMENTO UP -> %d\n", c, par);
             }
             break;
 
         case 0x2: // SET PORTAMENTO DOWN
             if (par) {
                 chan_efx[c].porta_down = par;
-                // printf("C%d: SET PORTAMENTO DOWN -> %d\n", c, par);
+                DEBUG_PRINTF("C%d: SET PORTAMENTO DOWN -> %d\n", c, par);
             }
             break;
 
         case 0x3: // SET TONE PORTAMENTO
             if (par) {
                 chan_efx[c].tone_porta_speed = par;
-                // printf("C%d: SET TONE PORTAMENTO, SPEED -> %d\n", c, par);
+                DEBUG_PRINTF("C%d: SET TONE PORTAMENTO, SPEED -> %d\n", c, par);
             }
             break;
 
@@ -807,21 +815,21 @@ public:
             chan_efx[c].vibrato_enable = true;
             if (par) {
                 chan_efx[c].vibrato.set_param(par);
-                // printf("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
+                DEBUG_PRINTF("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
             }
             break;
 
         case 0x5: // SET VOLUME SLIDE
             // if (par)
                 chan_efx[c].vol_slide_par = par;
-                // printf("C%d: SET VOLUME SLIDE -> +%d -%d, TONE PORTAMENTO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
+                DEBUG_PRINTF("C%d: SET VOLUME SLIDE -> +%d -%d, TONE PORTAMENTO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
             break;
 
         case 0x6: // SET VOLUME SLIDE + VIBRATO
             chan_efx[c].vibrato_enable = true;
             // if (par)
                 chan_efx[c].vol_slide_par = par;
-                // printf("C%d: SET VOLUME SLIDE -> +%d -%d, VIBRATO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
+                DEBUG_PRINTF("C%d: SET VOLUME SLIDE -> +%d -%d, VIBRATO -> CONTINUE\n", c, U8_HI(par), U8_LO(par));
             break;
 
         case 0x7: // SET TREMOLOS
@@ -829,35 +837,35 @@ public:
             chan_efx[c].base_volume = channels[c].get_volume();
             if (par) {
                 chan_efx[c].tremolo.set_param(par);
-                // printf("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
+                DEBUG_PRINTF("C%d: SET VIBRATO, RATE -> %d, DEPTH -> %d\n", c, U8_HI(par), U8_LO(par));
             }
             break;
 
         case 0x8: // Set Panning, PC MOD extension
             chan_pan[c] = par;
-            // printf("C%d: SET PAN -> %d\n", c, par);
+            DEBUG_PRINTF("C%d: SET PAN -> %d\n", c, par);
             break;
 
         case 0x9: // SET SAMPLE OFFSET
             channels[c].start();
             channels[c].set_sample_offset((int)par * 256);
-            // printf("C%d: SET SAMPLE OFFSET -> %d\n", c, par << 8);
+            DEBUG_PRINTF("C%d: SET SAMPLE OFFSET -> %d\n", c, par << 8);
             break;
 
         case 0xA: // SET VOLUME SLIDE
             // if (par)
                 chan_efx[c].vol_slide_par = par;
-                // printf("C%d: SET VOLUME SLIDE -> +%d -%d\n", c, U8_HI(par), U8_LO(par));
+                DEBUG_PRINTF("C%d: SET VOLUME SLIDE -> +%d -%d\n", c, U8_HI(par), U8_LO(par));
             break;
 
         case 0xC: // SET VOLUME
             channels[c].set_volume(par);
-            // printf("C%d: SET VOLUME -> %d\n", c, par);
+            DEBUG_PRINTF("C%d: SET VOLUME -> %d\n", c, par);
             break;
 
         case 0xD: // SET PATTERN BREAK
             pattern_break = par;
-            printf("GLOBAL: PATTERN BREAK -> %d\n", par);
+            DEBUG_PRINTF("GLOBAL: PATTERN BREAK -> %d\n", par);
             break;
 
         case 0xE: // Sub command
@@ -867,29 +875,29 @@ public:
                 case 0x1: // FINE SLIDE UP
                     channels[c].set_period(channels[c].get_period() - E_par);
                     chan_efx[c].base_period = channels[c].get_period();
-                    // printf("C%d: FINE SLIDE UP -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: FINE SLIDE UP -> %d\n", c, E_par);
                     break;
 
                 case 0x2: // FINE SLIDE DOWN
                     channels[c].set_period(channels[c].get_period() + E_par);
                     chan_efx[c].base_period = channels[c].get_period();
-                    // printf("C%d: FINE SLIDE DOWN -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: FINE SLIDE DOWN -> %d\n", c, E_par);
                     break;
 
                 case 0x4: // SET VIBRATO WAVEFORM
                     chan_efx[c].vibrato.set_waveform(E_par);
-                    // printf("C%d: SET VIBRATO WAVEFORM -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET VIBRATO WAVEFORM -> %d\n", c, E_par);
                     break;
 
                 case 0x5: // SET FINETUNE
                     channels[c].set_finetune((int8_t)(E_par ^ 0x08) - 0x08);
-                    // printf("C%d: SET FINETUNE -> %d\n", c, channels[c].get_finetune());
+                    DEBUG_PRINTF("C%d: SET FINETUNE -> %d\n", c, channels[c].get_finetune());
                     break;
 
                 case 0x6: // PATTERN LOOP
                     if (E_par == 0) {
                         pattern_loop_start = row;
-                        printf("Pattern Loop Start: %d\n", pattern_loop_start);
+                        DEBUG_PRINTF("Pattern Loop Start: %d\n", pattern_loop_start);
                     } else {
                         if (pattern_loop_count == 0) {
                             pattern_loop_count = E_par;
@@ -899,35 +907,35 @@ public:
 
                         if (pattern_loop_count != 0) {
                             pattern_loop = pattern_loop_start;
-                            printf("Pattern Loop Jump -> row %d, count left: %d\n",
+                            DEBUG_PRINTF("Pattern Loop Jump -> row %d, count left: %d\n",
                                     pattern_loop, pattern_loop_count);
                         } else {
-                            printf("Pattern Loop End\n");
+                            DEBUG_PRINTF("Pattern Loop End\n");
                         }
                     }
 
-                    printf("C%d: SET PATTERN LOOP -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET PATTERN LOOP -> %d\n", c, E_par);
                     break;
 
                 case 0x7: // SET TREMOLO WAVEFORM
                     chan_efx[c].tremolo.set_waveform(E_par);
-                    // printf("C%d: SET TREMOLO WAVEFORM -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET TREMOLO WAVEFORM -> %d\n", c, E_par);
                     break;
 
                 case 0x9: // RETRIG NOTE
                     chan_efx[c].retrig_note = E_par;
                     chan_efx[c].retrig_note_tick = E_par;
-                    // printf("C%d: SET RETRIG NOTE -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET RETRIG NOTE -> %d\n", c, E_par);
                     break;
 
                 case 0xA: // FINE VOLUME SLIDE UP
                     channels[c].set_volume(channels[c].get_volume() + E_par);
-                    // printf("C%d: FINE VOLUME SLIDE UP -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: FINE VOLUME SLIDE UP -> %d\n", c, E_par);
                     break;
 
                 case 0xB: // FINE VOLUME SLIDE DOWN
                     channels[c].set_volume(channels[c].get_volume() - E_par);
-                    // printf("C%d: FINE VOLUME SLIDE DOWN -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: FINE VOLUME SLIDE DOWN -> %d\n", c, E_par);
                     break;
 
                 case 0xC: // SET NOTE CUT TICK
@@ -935,16 +943,16 @@ public:
                     if (E_par == 0) {
                         channels[c].set_volume(0);
                     }
-                    // printf("C%d: SET NOTE CUT TICK -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET NOTE CUT TICK -> %d\n", c, E_par);
                     break;
 
                 case 0xD: // NOTE DELAY
                     chan_efx[c].note_delay_tick = E_par;
-                    // printf("C%d: SET NOTE DELAY -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET NOTE DELAY -> %d\n", c, E_par);
                     break;
 
                 case 0xE: // PATTERN DELAY
-                    printf("C%d: UNSUPPORTED PATTERN DELAY :P\n", c);
+                    DEBUG_PRINTF("C%d: UNSUPPORTED PATTERN DELAY :P\n", c);
                     // I analyzed over 10000 .mod files,
                     // and found that only about 2% of them used the EEx command,
                     // so I decided not to bother with it XD
@@ -952,7 +960,7 @@ public:
 
                 case 0xF: // INVERT LOOP
                     channels[c].set_invert_loop(E_par);
-                    // printf("C%d: SET INVERT LOOP -> %d\n", c, E_par);
+                    DEBUG_PRINTF("C%d: SET INVERT LOOP -> %d\n", c, E_par);
                     break;
 
                 default:
@@ -964,15 +972,15 @@ public:
         case 0xF:
             if (par >= 0x20) {
                 set_tempo(par);
-                printf("GLOBAL: SET TEMPO -> %d\n", par);
+                DEBUG_PRINTF("GLOBAL: SET TEMPO -> %d\n", par);
             } else {
                 set_ticks_row(par);
-                printf("GLOBAL: SET TICKS/ROW -> %d\n", par);
+                DEBUG_PRINTF("GLOBAL: SET TICKS/ROW -> %d\n", par);
             }
             break;
 
         default:
-            // // printf("C%d: UNKNOW EFX %1X%02X\n", c, cmd, par);
+            // DEBUG_PRINTF("C%d: UNKNOW EFX %1X%02X\n", c, cmd, par);
             break;
         }
     }
@@ -1022,14 +1030,22 @@ public:
         for (int c = 0; c < get_num_channel(); c++) {
             note_t *note = mod->get_note_order(pos, c, row);
             if (note == NULL) {
-                // printf("WARN: Null note on P=%d, C=%d, R=%d\n", pos, c, row);
+                // DEBUG_PRINTF("WARN: Null note on P=%d, C=%d, R=%d\n", pos, c, row);
                 continue;
             }
 
+            if (note->sample) {
+                if ((note->efx_cmd == 0xE) && (U8_HI(note->efx_par) == 0xD)) {
+                    chan_efx[c].note_delay_sample = note->sample - 1;
+                    continue;
+                } else {
+                    channels[c].set_sample(mod->get_sample(note->sample - 1));
+                }
+            }
             if (note->period) {
                 if ((note->efx_cmd == 0x3) || (note->efx_cmd == 0x5)) {
                     chan_efx[c].tone_porta_target_period = note->period;
-                    // printf("C%d: SET TONEPORTAMENTO TARGET -> %d\n", c, note->period);
+                    DEBUG_PRINTF("C%d: SET TONEPORTAMENTO TARGET -> %d\n", c, note->period);
                 } else if ((note->efx_cmd == 0xE) && (U8_HI(note->efx_par) == 0xD)) {
                     chan_efx[c].note_delay_period = note->period;
                     continue;
@@ -1042,14 +1058,6 @@ public:
                 chan_efx[c].base_period = channels[c].get_period();
                 chan_efx[c].tremolo.reset_phase_if_needed();
                 chan_efx[c].base_volume = channels[c].get_volume();
-            }
-            if (note->sample) {
-                if ((note->efx_cmd == 0xE) && (U8_HI(note->efx_par) == 0xD)) {
-                    chan_efx[c].note_delay_sample = note->sample - 1;
-                    continue;
-                } else {
-                    channels[c].set_sample(mod->get_sample(note->sample - 1));
-                }
             }
             process_row_efx(c, note->efx_cmd, note->efx_par);
         }
@@ -1079,7 +1087,7 @@ public:
             pattern_loop_count = 0;
             pattern_loop = -1;
 
-            printf("frame(%d)\033[2J\033[H", pos);
+            DEBUG_PRINTF("frame(%d)\033[2J\033[H", pos);
         }
     }
 
